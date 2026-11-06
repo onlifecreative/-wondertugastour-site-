@@ -230,7 +230,7 @@ const AVAILABLE_DATES = [];
 /* CHECKOUT STRIPE: URL del Cloudflare Worker (lo crei nello STEP 4B del piano).
    Esempio: "https://wondertugas-pay.TUO-UTENTE.workers.dev"
    Lascia vuoto "" = il bottone torna a WhatsApp. */
-const CHECKOUT_URL = "";
+const CHECKOUT_URL = "https://wondertugastour-pay.riccardorasocostabile.workers.dev";
 const TOURS = [
   {
     category:"lisbona", tag:"Il cuore della città", tagColor:"yellow",
@@ -392,12 +392,37 @@ document.getElementById('m-date').addEventListener('change', updateCTA);
 document.getElementById('m-pax').addEventListener('input', updateCTA);
 document.getElementById('m-notes').addEventListener('input', updateCTA);
 
-/* ---------- CALENDARIO DISPONIBILITÀ ---------- */
+/* ---------- CALENDARIO DISPONIBILITÀ ----------
+   Priorità: 1) date dal calendario Google (via Worker, auto)
+             2) fallback: array AVAILABLE_DATES qui sotto
+             3) nessuna data = il cliente sceglie libero */
+let availCache = null; // null = non caricato · [] = nessuna data · [date...] = cliccabili
+
+async function loadAvailability(){
+  if(availCache !== null) return availCache;
+  if(!CHECKOUT_URL){ availCache = AVAILABLE_DATES.slice(); return availCache; }
+  try{
+    const r = await fetch(CHECKOUT_URL.replace(/\/+$/,'') + '/availability');
+    const d = await r.json();
+    availCache = (d.dates && d.dates.length) ? d.dates : (AVAILABLE_DATES.length ? AVAILABLE_DATES.slice() : []);
+  }catch(e){
+    availCache = AVAILABLE_DATES.length ? AVAILABLE_DATES.slice() : [];
+  }
+  return availCache;
+}
+
 function renderCal(){
   const wrap = document.getElementById('cal-wrap');
   const cal = document.getElementById('cal');
   cal.innerHTML = '';
-  if(!AVAILABLE_DATES.length){ wrap.style.display = 'none'; return; }
+  loadAvailability().then(dates => paintCal(dates));
+}
+
+function paintCal(dates){
+  const wrap = document.getElementById('cal-wrap');
+  const cal = document.getElementById('cal');
+  cal.innerHTML = '';
+  if(!dates.length){ wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
   const today = new Date();
   for(let m = 0; m < 2; m++){
@@ -410,7 +435,7 @@ function renderCal(){
     for(let i = 0; i < firstDow; i++) h += '<div class="d"></div>';
     for(let d = 1; d <= daysIn; d++){
       const iso = `${base.getFullYear()}-${String(base.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const av = AVAILABLE_DATES.includes(iso);
+      const av = dates.includes(iso);
       h += av
         ? `<div class="d av" data-date="${iso}" onclick="pickDate('${iso}',this)">${d}</div>`
         : `<div class="d">${d}</div>`;
@@ -457,6 +482,8 @@ async function payNow(){
   if(!CHECKOUT_URL){ window.open(document.getElementById('m-wa').href, '_blank'); return; }
   const date = document.getElementById('m-date').value;
   if(!date){ alert('Seleziona prima la data del tour.'); return; }
+  const avail = await loadAvailability();
+  if(avail.length && !avail.includes(date)){ alert('Questa data non è disponibile — scegli una data evidenziata in verde nel calendario.'); return; }
   const pax = parseInt(document.getElementById('m-pax').value) || 2;
   const notes = document.getElementById('m-notes').value.trim();
   btn.disabled = true; btn.textContent = 'Connessione a Stripe…';
